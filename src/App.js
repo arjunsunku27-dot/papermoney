@@ -405,18 +405,14 @@ A 2-3 sentence overall verdict on this portfolio. Be honest — if it's bad, say
 Remember: this is a simulator, so be educational and engaging. Use real financial reasoning.`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/forecast", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }]
-        })
+        body: JSON.stringify({ prompt, maxTokens: 1000 })
       });
       const data = await res.json();
-      const text = data?.content?.[0]?.text ?? "Could not generate forecast. Please try again.";
-      setForecast(text);
+      if (data.error) throw new Error(data.error);
+      setForecast(data.text);
     } catch (e) {
       setForecast("Network error — please try again.");
     }
