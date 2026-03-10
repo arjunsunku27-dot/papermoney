@@ -310,6 +310,10 @@ export default function App() {
   const [showReset, setShowReset] = useState(false);
   const [forecast, setForecast] = useState(null);
   const [forecasting, setForecasting] = useState(false);
+  const [stockForecast, setStockForecast] = useState(null);
+  const [stockForecasting, setStockForecasting] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [mobileView, setMobileView] = useState("market");
   const fetchQueue = useRef([]);
   const isFetching = useRef(false);
 
@@ -337,8 +341,22 @@ export default function App() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // ── FREE AI via Groq (completely free, no credit card) ─────────────────────
+  // Sign up at console.groq.com → API Keys → Create Key → paste below
+  const callGroq = async (prompt, maxTokens = 1024) => {
+    const res = await fetch("/api/forecast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, maxTokens })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data.text;
+  };
+
   const runForecast = async () => {
     if (forecasting) return;
+
     setForecasting(true);
     setForecast(null);
     setTab("forecast");
@@ -348,8 +366,7 @@ export default function App() {
       const val = st ? st.price * h.shares : h.costBasis;
       const gain = val - h.costBasis;
       const gainPct = ((gain / h.costBasis) * 100).toFixed(2);
-      const changePct = st?.changePct ?? 0;
-      return `${sym} (${st?.name ?? sym}): ${h.shares.toFixed(4)} shares @ avg $${(h.costBasis/h.shares).toFixed(2)}, current $${st ? st.price.toFixed(2) : "?"}, unrealized P&L: ${gain >= 0 ? "+" : ""}$${Math.abs(gain).toFixed(2)} (${gainPct}%), today: ${changePct >= 0 ? "+" : ""}${changePct}%, category: ${st?.category ?? "?"}`;
+      return `${sym} (${st?.name ?? sym}): ${h.shares.toFixed(4)} shares @ avg $${(h.costBasis/h.shares).toFixed(2)}, current $${st ? st.price.toFixed(2) : "?"}, P&L: ${gain >= 0 ? "+" : ""}$${Math.abs(gain).toFixed(2)} (${gainPct}%), category: ${st?.category ?? "?"}`;
     });
 
     const totalVal = cash + Object.entries(portfolio).reduce((s,[sym,h]) => {
@@ -359,64 +376,108 @@ export default function App() {
     const totalInv = Object.values(portfolio).reduce((s,h) => s + h.costBasis, 0);
     const totalGainAmt = totalVal - startingCash;
     const totalGainPctVal = ((totalGainAmt / startingCash) * 100).toFixed(2);
-    const numTrades = transactions.length;
     const buys = transactions.filter(t => t.type === "BUY").length;
     const sells = transactions.filter(t => t.type === "SELL").length;
 
-    const prompt = `You are a financial analyst AI for a virtual stock trading simulator called PaperMoney. Analyze this user's portfolio and provide a detailed, engaging forecast. Be specific, use numbers, and make it feel like a real analyst report. Use plain text only — no markdown, no asterisks, no bullet dashes, just clean sections with ALL CAPS headers.
+    const prompt = `You are a financial analyst AI for a virtual stock trading simulator called PaperMoney. Analyze this portfolio and give a detailed forecast. Use plain text only, no markdown, no asterisks, no bullet dashes. Use ALL CAPS for section headers only.
 
 PORTFOLIO SNAPSHOT:
-- Starting capital: $${startingCash.toLocaleString()}
-- Current net worth: $${totalVal.toFixed(2)}
-- Cash on hand: $${cash.toFixed(2)}
-- Total invested: $${totalInv.toFixed(2)}
-- Overall gain/loss: ${totalGainAmt >= 0 ? "+" : ""}$${Math.abs(totalGainAmt).toFixed(2)} (${totalGainPctVal}%)
-- Total trades made: ${numTrades} (${buys} buys, ${sells} sells)
+Starting capital: $${startingCash.toLocaleString()}
+Current net worth: $${totalVal.toFixed(2)}
+Cash on hand: $${cash.toFixed(2)}
+Total invested: $${totalInv.toFixed(2)}
+Overall gain/loss: ${totalGainAmt >= 0 ? "+" : ""}$${Math.abs(totalGainAmt).toFixed(2)} (${totalGainPctVal}%)
+Total trades: ${transactions.length} (${buys} buys, ${sells} sells)
 
 CURRENT POSITIONS:
-${positions.length > 0 ? positions.join("\n") : "No open positions — all cash."}
+${positions.length > 0 ? positions.join("\n") : "No open positions, all cash."}
 
-Please provide:
+Provide these sections:
 
 PORTFOLIO HEALTH SCORE
-Give a score out of 100 and explain why.
+Score out of 100 with explanation.
 
 DIVERSIFICATION ANALYSIS
-Analyze how spread out the portfolio is across sectors and asset types. Is it too concentrated?
+How spread out is this portfolio? Is it too concentrated?
 
 30-DAY FORECAST
-Based on current holdings and market trends, predict realistic portfolio value in 30 days with a low, base, and high scenario in dollars.
+Low, base, and high scenario in dollars.
 
 90-DAY FORECAST
-Same but for 90 days.
+Low, base, and high scenario in dollars.
 
 1-YEAR FORECAST
-Project 1 year out with low/base/high scenarios.
+Low, base, and high scenario in dollars.
 
 BIGGEST RISKS
-What are the top 3 risks in this portfolio right now?
+Top 3 risks in this portfolio.
 
 TOP OPPORTUNITIES
-What are 3 specific moves the user could make to improve their portfolio? Name specific stocks or ETFs.
+3 specific stocks or ETFs the user should consider adding.
 
 ANALYST VERDICT
-A 2-3 sentence overall verdict on this portfolio. Be honest — if it's bad, say so constructively.
-
-Remember: this is a simulator, so be educational and engaging. Use real financial reasoning.`;
+2-3 sentence overall verdict. Be honest and educational.`;
 
     try {
-      const res = await fetch("/api/forecast", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, maxTokens: 1000 })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setForecast(data.text);
+      const text = await callGroq(prompt, 1024);
+      setForecast(text);
     } catch (e) {
-      setForecast("Network error — please try again.");
+      setForecast("Network error — check your Groq API key in App.js.");
     }
     setForecasting(false);
+  };
+
+  const runStockForecast = async (stock) => {
+    if (stockForecasting) return;
+
+    setStockForecasting(true);
+    setStockForecast(null);
+
+    const holding = portfolio[stock.symbol];
+    const holdingInfo = holding
+      ? `User owns ${holding.shares.toFixed(4)} shares, avg cost $${(holding.costBasis/holding.shares).toFixed(2)}, invested $${holding.costBasis.toFixed(2)}, current value $${(stock.price*holding.shares).toFixed(2)}, P&L ${(stock.price*holding.shares-holding.costBasis)>=0?"+":""}$${Math.abs(stock.price*holding.shares-holding.costBasis).toFixed(2)}.`
+      : "User does not currently own this stock.";
+
+    const prompt = `You are a senior equity research analyst for a virtual trading simulator. Give a 10-year investment outlook for ${stock.symbol} (${stock.name}). Current price: $${stock.price.toFixed(2)}. Sector: ${stock.category}. ${holdingInfo}
+
+Use plain text only. No markdown, no asterisks, no dashes. ALL CAPS for section headers only.
+
+COMPANY OVERVIEW
+What this company does and its market position in 2-3 sentences.
+
+GROWTH CATALYSTS
+The 3 biggest factors that could drive this stock higher over 10 years.
+
+KEY RISKS
+The 3 biggest threats to this company over the next decade.
+
+YEAR BY YEAR PRICE OUTLOOK
+Realistic estimated price range for years 1, 2, 3, 5, 7, and 10. Format each line as:
+YEAR 1: $LOW - $HIGH
+YEAR 2: $LOW - $HIGH
+YEAR 3: $LOW - $HIGH
+YEAR 5: $LOW - $HIGH
+YEAR 7: $LOW - $HIGH
+YEAR 10: $LOW - $HIGH
+
+10-YEAR SCENARIOS
+BULL CASE: price if everything goes right
+BASE CASE: most likely price
+BEAR CASE: price if things go badly
+
+ANALYST RATING
+STRONG BUY, BUY, HOLD, SELL, or STRONG SELL with 2 sentence explanation.
+
+SIMULATOR VERDICT
+Should the user buy, hold, or sell right now? Specific advice based on their position.`;
+
+    try {
+      const text = await callGroq(prompt, 1200);
+      setStockForecast({ text, symbol: stock.symbol, name: stock.name, price: stock.price });
+    } catch (e) {
+      setStockForecast({ text: "Network error — check your Groq API key in App.js.", symbol: stock.symbol, name: stock.name, price: stock.price });
+    }
+    setStockForecasting(false);
   };
 
   // Queue-based fetcher to avoid rate limits
@@ -559,13 +620,13 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
 
   if (!gameStarted) {
     return (
-      <div style={{ minHeight:"100vh", background:"#07090f", color:"#dde1ed", fontFamily:"'IBM Plex Mono', monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ minHeight:"100vh", background:"#07090f", color:"#dde1ed", fontFamily:"'IBM Plex Mono', monospace", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px" }}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Bebas+Neue&display=swap'); *{box-sizing:border-box;margin:0;padding:0} .preset:hover{background:#131a2a!important;border-color:#38bdf8!important;color:#38bdf8!important}`}</style>
         <div style={{ textAlign:"center", marginBottom:40 }}>
           <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:64, letterSpacing:".1em", color:"#38bdf8", lineHeight:1 }}>PAPERMONEY</div>
           <div style={{ fontSize:12, color:"#334", letterSpacing:".2em", marginTop:6 }}>VIRTUAL STOCK TRADING SIMULATOR</div>
         </div>
-        <div style={{ background:"#0d1018", border:"1px solid #1a2030", borderRadius:6, padding:32, width:480, maxWidth:"90vw" }}>
+        <div style={{ background:"#0d1018", border:"1px solid #1a2030", borderRadius:6, padding:32, width:480, maxWidth:"95vw" }}>
           <div style={{ fontSize:11, color:"#445", letterSpacing:".12em", marginBottom:20, textAlign:"center" }}>HOW MUCH VIRTUAL CASH DO YOU WANT TO START WITH?</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:20 }}>
             {PRESET_AMOUNTS.map(amt => (
@@ -587,6 +648,22 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
               ${startingCash >= 1000000 ? (startingCash/1000000).toFixed(startingCash%1000000===0?0:2)+"M" : startingCash.toLocaleString("en-US")}
             </span>
           </div>
+
+          {/* Mobile Mode Toggle */}
+          <div style={{ background:"#07090f", border:`1px solid ${isMobile ? "#a78bfa" : "#1a2030"}`, borderRadius:4, padding:"12px 16px", marginBottom:20 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:11, color: isMobile ? "#a78bfa" : "#445", letterSpacing:".1em" }}>📱 PHONE MODE</div>
+                <div style={{ fontSize:10, color:"#334", marginTop:3 }}>
+                  {window.innerWidth <= 768 ? "Auto-detected: mobile device" : "Auto-detected: desktop"}
+                </div>
+              </div>
+              <div onClick={() => setIsMobile(m => !m)} style={{ width:44, height:24, borderRadius:12, background: isMobile ? "#a78bfa" : "#1a2030", cursor:"pointer", position:"relative", transition:"background .2s", flexShrink:0 }}>
+                <div style={{ position:"absolute", top:3, left: isMobile ? 23 : 3, width:18, height:18, borderRadius:"50%", background:"#fff", transition:"left .2s" }} />
+              </div>
+            </div>
+          </div>
+
           <button onClick={() => startGame(startingCash)}
             style={{ width:"100%", background:"#38bdf8", color:"#07090f", border:"none", borderRadius:4, padding:"14px", fontFamily:"Bebas Neue, sans-serif", fontSize:18, letterSpacing:".1em", cursor:"pointer", transition:"background .15s" }}
             onMouseEnter={e=>e.currentTarget.style.background="#7dd3fc"}
@@ -696,6 +773,191 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
         </div>
       </div>
 
+      {isMobile ? (
+        /* ── MOBILE LAYOUT ── */
+        <div style={{ height:"calc(100vh - 53px)", display:"flex", flexDirection:"column", overflow:"hidden" }}>
+          {/* Mobile content area */}
+          <div style={{ flex:1, overflow:"auto" }}>
+
+            {/* MARKET LIST */}
+            {mobileView === "market" && (
+              <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
+                <div style={{ padding:"10px 14px", borderBottom:"1px solid #0d1018", display:"flex", gap:8 }}>
+                  <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search..." style={{ flex:1, background:"#0d1018", border:"1px solid #1a2030", borderRadius:3, padding:"7px 10px", color:"#dde1ed", fontFamily:"inherit", fontSize:12 }} />
+                </div>
+                <div style={{ overflowX:"auto", padding:"8px 14px", borderBottom:"1px solid #0d1018", display:"flex", gap:6 }}>
+                  {CATEGORIES.map(c => (
+                    <button key={c} className={`catbtn ${category===c?"on":""}`} style={{ color: category===c ? catColor(c) : undefined }} onClick={()=>setCategory(c)}>{c}</button>
+                  ))}
+                </div>
+                <div style={{ flex:1, overflowY:"auto" }}>
+                  {filteredWatchlist.map(s => (
+                    <div key={s.symbol} className={`row${selected?.symbol===s.symbol?" active":""}`}
+                      onClick={()=>{ setSelected(s); setMobileView("detail"); setQty(""); setStockForecast(null); }}>
+                      <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:14, color:"#38bdf8", letterSpacing:".04em" }}>{s.symbol}</div>
+                      <div style={{ overflow:"hidden" }}>
+                        <div style={{ fontSize:11, color:"#889", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.name}</div>
+                        <div style={{ fontSize:10 }}><span className="pill" style={{ background: catColor(s.category)+"18", color: catColor(s.category) }}>{s.category}</span></div>
+                      </div>
+                      <svg width="60" height="24" style={{ flexShrink:0 }}>
+                        {s.history?.length > 1 && <>
+                          <defs><linearGradient id={`mg${s.symbol}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={s.changePct>=0?"#34d399":"#f87171"} stopOpacity=".25"/><stop offset="100%" stopColor={s.changePct>=0?"#34d399":"#f87171"} stopOpacity="0"/></linearGradient></defs>
+                          <path d={sparkPath(s.history,60,24)+"L60,24L0,24Z"} fill={`url(#mg${s.symbol})`}/>
+                          <path d={sparkPath(s.history,60,24)} fill="none" stroke={s.changePct>=0?"#34d399":"#f87171"} strokeWidth="1.5"/>
+                        </>}
+                      </svg>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:12, fontWeight:600 }}>${fmtPrice(s.price)}</div>
+                        <div style={{ fontSize:10, color:s.changePct>=0?"#34d399":"#f87171" }}>{s.changePct>=0?"+":""}{s.changePct.toFixed(2)}%</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* STOCK DETAIL */}
+            {mobileView === "detail" && selected && (() => {
+              const selectedStock = watchlist.find(w => w.symbol === selected.symbol) || selected;
+              const pos = portfolio[selectedStock.symbol];
+              const posValue = pos ? pos.shares * selectedStock.price : 0;
+              const posGain = pos ? posValue - pos.costBasis : 0;
+              const posGainPct = pos ? (posGain / pos.costBasis * 100) : 0;
+              const maxShares = Math.floor(cash / selectedStock.price);
+              return (
+                <div style={{ padding:16 }}>
+                  <button onClick={()=>setMobileView("market")} style={{ background:"none", border:"none", color:"#38bdf8", fontFamily:"inherit", fontSize:11, cursor:"pointer", marginBottom:12, padding:0 }}>← BACK</button>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:28, color:"#38bdf8", letterSpacing:".06em" }}>{selectedStock.symbol}</div>
+                      <div style={{ fontSize:11, color:"#556" }}>{selectedStock.name}</div>
+                      <span className="pill" style={{ background: catColor(selectedStock.category)+"18", color: catColor(selectedStock.category), marginTop:4, display:"inline-block" }}>{selectedStock.category}</span>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:28, letterSpacing:".02em" }}>${fmtPrice(selectedStock.price)}</div>
+                      <div style={{ fontSize:12, color:selectedStock.changePct>=0?"#34d399":"#f87171" }}>{selectedStock.changePct>=0?"▲":"▼"} {Math.abs(selectedStock.changePct).toFixed(2)}%</div>
+                    </div>
+                  </div>
+                  <BigChartSVG history={selectedStock.history} color={selectedStock.changePct>=0?"#34d399":"#f87171"} symbol={selectedStock.symbol} />
+                  {pos && (
+                    <div style={{ background:"#0d1018", border:"1px solid #1a2030", borderRadius:4, padding:12, marginTop:12 }}>
+                      <div style={{ fontSize:10, color:"#445", letterSpacing:".1em", marginBottom:8 }}>YOUR POSITION</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                        {[["SHARES", fmt(pos.shares)],["MKT VALUE",`$${fmt(posValue)}`],["COST BASIS",`$${fmt(pos.costBasis)}`],["GAIN/LOSS",`${posGain>=0?"+":""}$${fmt(posGain)} (${posGainPct.toFixed(2)}%)`,posGain>=0?"#34d399":"#f87171"]].map(([l,v,c])=>(
+                          <div key={l}><div style={{fontSize:9,color:"#334",letterSpacing:".1em"}}>{l}</div><div style={{fontSize:13,color:c||"#dde1ed",fontWeight:600}}>{v}</div></div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ marginTop:12 }}>
+                    <div style={{ fontSize:10, color:"#445", letterSpacing:".1em", marginBottom:8 }}>PLACE ORDER</div>
+                    <input type="number" value={qty} onChange={e=>setQty(e.target.value)} placeholder="Number of Shares" style={{ width:"100%", background:"#0d1018", border:"1px solid #1a2030", borderRadius:3, padding:"10px 12px", color:"#dde1ed", fontFamily:"inherit", fontSize:14, marginBottom:10 }} />
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                      <button className="btn btn-b" onClick={()=>buy(selectedStock, parseFloat(qty))}>BUY</button>
+                      <button className="btn btn-s" onClick={()=>sell(selectedStock, parseFloat(qty))}>SELL</button>
+                    </div>
+                    <div style={{ fontSize:11, color:"#334", marginBottom:8 }}>Cash: <span style={{color:"#34d399"}}>${Number(cash).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</span> · Max: {maxShares}</div>
+                    <div style={{ display:"flex", gap:6 }}>
+                      {[100,500,1000].map(amt=>(
+                        <button key={amt} onClick={()=>{const s=Math.floor(amt/selectedStock.price*10000)/10000;setQty(String(s));buy(selectedStock,s);}} style={{ flex:1, background:"#0d1018", border:"1px solid #1a2030", borderRadius:3, padding:"8px 0", color:"#38bdf8", fontFamily:"inherit", fontSize:11, cursor:"pointer" }}>{amt>=1000?"$1k":"$"+amt}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Stock AI Forecast */}
+                  <div style={{ marginTop:16, background:"#0a0a18", border:"1px solid #1a1a35", borderRadius:6, padding:14 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                      <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:14, color:"#a78bfa", letterSpacing:".06em" }}>🔮 AI 10-YEAR FORECAST</div>
+                      <button onClick={()=>runStockForecast(selectedStock)} disabled={stockForecasting} style={{ background:"#1a1a35", border:"1px solid #3a2a6a", color:"#a78bfa", borderRadius:3, padding:"5px 10px", cursor:"pointer", fontFamily:"inherit", fontSize:10 }}>
+                        {stockForecasting ? "..." : "ANALYZE"}
+                      </button>
+                    </div>
+                    {stockForecasting && <div style={{color:"#a78bfa",fontSize:11,textAlign:"center",padding:"10px 0"}}>Generating forecast...</div>}
+                    {stockForecast?.symbol === selectedStock.symbol && (
+                      <div style={{ fontSize:11, color:"#aab", lineHeight:1.7, whiteSpace:"pre-wrap" }}>{stockForecast.text}</div>
+                    )}
+                    {!stockForecasting && !stockForecast && (
+                      <div style={{ fontSize:11, color:"#334", textAlign:"center", padding:"8px 0" }}>Tap ANALYZE for AI forecast</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* PORTFOLIO */}
+            {mobileView === "portfolio" && (
+              <div style={{ padding:16 }}>
+                <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:18, color:"#38bdf8", letterSpacing:".06em", marginBottom:14 }}>PORTFOLIO</div>
+                {Object.keys(portfolio).length === 0 ? (
+                  <div style={{ textAlign:"center", color:"#334", padding:"40px 0" }}>No positions yet. Buy some stocks!</div>
+                ) : Object.entries(portfolio).map(([sym, pos]) => {
+                  const stock = watchlist.find(w => w.symbol === sym);
+                  const price = stock?.price ?? pos.avgPrice;
+                  const value = pos.shares * price;
+                  const gain = value - pos.costBasis;
+                  const pct = (gain / pos.costBasis * 100);
+                  return (
+                    <div key={sym} style={{ background:"#0d1018", border:"1px solid #1a2030", borderRadius:4, padding:12, marginBottom:8 }}
+                      onClick={()=>{ setSelected(stock); setMobileView("detail"); setQty(""); }}>
+                      <div style={{ display:"flex", justifyContent:"space-between" }}>
+                        <span style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:16, color:"#38bdf8" }}>{sym}</span>
+                        <span style={{ color:gain>=0?"#34d399":"#f87171", fontWeight:600 }}>{gain>=0?"+":""}${fmt(gain)}</span>
+                      </div>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginTop:4, fontSize:11, color:"#556" }}>
+                        <span>{fmt(pos.shares)} shares · ${fmtPrice(price)}</span>
+                        <span style={{ color:pct>=0?"#34d399":"#f87171" }}>{pct>=0?"+":""}{pct.toFixed(2)}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* HISTORY */}
+            {mobileView === "history" && (
+              <div style={{ padding:16 }}>
+                <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:18, color:"#38bdf8", letterSpacing:".06em", marginBottom:14 }}>HISTORY</div>
+                {transactions.length === 0 ? (
+                  <div style={{ textAlign:"center", color:"#334", padding:"40px 0" }}>No transactions yet.</div>
+                ) : [...transactions].reverse().map((t,i) => (
+                  <div key={i} style={{ background:"#0d1018", border:"1px solid #1a2030", borderRadius:4, padding:12, marginBottom:8 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between" }}>
+                      <span style={{ color:t.type==="BUY"?"#34d399":"#f87171", fontFamily:"Bebas Neue, sans-serif", fontSize:14 }}>{t.type} {t.symbol}</span>
+                      <span style={{ fontSize:11, color:"#445" }}>{new Date(t.date).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ fontSize:11, color:"#556", marginTop:4 }}>{fmt(t.shares)} shares @ ${fmtPrice(t.price)} = ${fmt(t.total)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* AI FORECAST */}
+            {mobileView === "forecast" && (
+              <div style={{ padding:16 }}>
+                <div style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:18, color:"#a78bfa", letterSpacing:".06em", marginBottom:4 }}>🤖 AI PORTFOLIO FORECAST</div>
+                <div style={{ fontSize:10, color:"#445", marginBottom:14 }}>Powered by Groq AI · Analyzes your actual holdings</div>
+                <button onClick={runForecast} disabled={forecasting} style={{ width:"100%", background: forecasting?"#1a1a35":"#a78bfa", color:"#07090f", border:"none", borderRadius:4, padding:"12px", fontFamily:"Bebas Neue, sans-serif", fontSize:16, letterSpacing:".08em", cursor:"pointer", marginBottom:16 }}>
+                  {forecasting ? "🤖 ANALYZING..." : forecast ? "RE-ANALYZE" : "RUN FORECAST"}
+                </button>
+                {forecasting && <div style={{ textAlign:"center", color:"#a78bfa", fontSize:11, padding:"20px 0" }}>Claude is analyzing your portfolio...</div>}
+                {forecast && !forecasting && (
+                  <div style={{ background:"#0a0a18", border:"1px solid #1a1a35", borderRadius:6, padding:14, fontSize:11, color:"#aab", lineHeight:1.8, whiteSpace:"pre-wrap" }}>{forecast}</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Mobile Bottom Nav */}
+          <div style={{ borderTop:"1px solid #1a2030", background:"#07090f", display:"flex", flexShrink:0 }}>
+            {[["market","📈","MARKET"],["portfolio","💼","PORTFOLIO"],["history","📋","HISTORY"],["forecast","🤖","AI"]].map(([v,icon,label])=>(
+              <button key={v} onClick={()=>setMobileView(v)} style={{ flex:1, background:"none", border:"none", padding:"10px 4px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
+                <span style={{ fontSize:18 }}>{icon}</span>
+                <span style={{ fontSize:9, letterSpacing:".08em", color: mobileView===v ? "#38bdf8" : "#445", fontFamily:"inherit" }}>{label}</span>
+                {mobileView===v && <div style={{ width:20, height:2, background:"#38bdf8", borderRadius:1 }} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
       <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", height:"calc(100vh - 53px)" }}>
 
         {/* LEFT */}
@@ -1086,7 +1348,7 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
                   </div>
                 </div>
                 <div style={{ fontSize:9, color:"#223", letterSpacing:".1em", marginBottom:7 }}>QUICK BUY</div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:5 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:5, marginBottom:16 }}>
                   {[100,500,1000,5000].filter(amt => amt <= cash * 1.1).map(amt => (
                     <button key={amt} onClick={()=>setQty((amt/selectedStock.price).toFixed(6))}
                       style={{ background:"#0d1018", border:"1px solid #1a2030", color:"#556", padding:"7px 4px", borderRadius:3, cursor:"pointer", fontFamily:"inherit", fontSize:10, transition:"all .15s" }}
@@ -1095,6 +1357,87 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
                       ${amt >= 1000 ? amt/1000+"k" : amt}
                     </button>
                   ))}
+                </div>
+
+                {/* ── AI 10-YEAR STOCK FORECAST ── */}
+                <div style={{ borderTop:"1px solid #1a1030", paddingTop:14 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                    <div>
+                      <div style={{ fontSize:11, color:"#a78bfa", fontWeight:600, letterSpacing:".04em" }}>🔮 AI 10-YEAR FORECAST</div>
+                      <div style={{ fontSize:10, color:"#334", marginTop:1 }}>Free · Powered by Groq AI</div>
+                    </div>
+                    <button onClick={()=>runStockForecast(selectedStock)} disabled={stockForecasting}
+                      style={{ background: stockForecasting ? "#0d0a18" : "#a78bfa22", color: stockForecasting ? "#334" : "#a78bfa", border:"1px solid #a78bfa33", borderRadius:3, padding:"6px 12px", fontFamily:"inherit", fontSize:10, cursor: stockForecasting ? "not-allowed" : "pointer", letterSpacing:".06em", transition:"all .15s" }}
+                      onMouseEnter={e=>{ if(!stockForecasting){ e.currentTarget.style.background="#a78bfa33"; }}}
+                      onMouseLeave={e=>{ if(!stockForecasting){ e.currentTarget.style.background="#a78bfa22"; }}}>
+                      {stockForecasting ? "ANALYZING..." : stockForecast?.symbol === selectedStock.symbol ? "RE-ANALYZE" : "ANALYZE"}
+                    </button>
+                  </div>
+
+                  {stockForecasting && (
+                    <div style={{ padding:"20px 0", textAlign:"center" }}>
+                      <div style={{ width:28, height:28, border:"2px solid #1a1030", borderTop:"2px solid #a78bfa", borderRadius:"50%", animation:"spin 1s linear infinite", margin:"0 auto 8px" }} />
+                      <div style={{ color:"#445", fontSize:10, letterSpacing:".08em" }}>ANALYZING {selectedStock.symbol}...</div>
+                    </div>
+                  )}
+
+                  {!stockForecasting && stockForecast?.symbol === selectedStock.symbol && (()=>{
+                    const lines = stockForecast.text.split("\n");
+                    const sections = [];
+                    let cur = null;
+                    for (const line of lines) {
+                      const t = line.trim();
+                      if (!t) continue;
+                      const isHeader = t === t.toUpperCase() && t.length > 3 && /^[A-Z0-9 /&():,-]+$/.test(t) && !t.startsWith("YEAR") && !t.startsWith("BULL") && !t.startsWith("BASE") && !t.startsWith("BEAR");
+                      if (isHeader) {
+                        if (cur) sections.push(cur);
+                        cur = { header: t, lines: [] };
+                      } else if (cur) {
+                        cur.lines.push(t);
+                      } else {
+                        cur = { header: null, lines: [t] };
+                      }
+                    }
+                    if (cur) sections.push(cur);
+
+                    const secColor = { "COMPANY OVERVIEW":"#38bdf8","GROWTH CATALYSTS":"#34d399","KEY RISKS":"#f87171","YEAR BY YEAR PRICE OUTLOOK":"#fbbf24","10-YEAR SCENARIOS":"#a78bfa","ANALYST RATING":"#f472b6","SIMULATOR VERDICT":"#34d399","SETUP REQUIRED":"#f87171" };
+                    const secIcon = { "COMPANY OVERVIEW":"🏢","GROWTH CATALYSTS":"🚀","KEY RISKS":"⚠️","YEAR BY YEAR PRICE OUTLOOK":"📈","10-YEAR SCENARIOS":"🔮","ANALYST RATING":"⭐","SIMULATOR VERDICT":"🎯","SETUP REQUIRED":"🔧" };
+
+                    return (
+                      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                        <div style={{ fontSize:9, color:"#223", letterSpacing:".08em" }}>
+                          {selectedStock.symbol} · ${fmtPrice(selectedStock.price)} · EDUCATIONAL PURPOSES ONLY
+                        </div>
+                        {sections.map((sec, i) => (
+                          <div key={i} style={{ background:"#0a0810", border:`1px solid ${secColor[sec.header]?secColor[sec.header]+"22":"#1a1030"}`, borderRadius:3, padding:"10px 12px", borderLeft:`2px solid ${secColor[sec.header]??"#2a2040"}` }}>
+                            {sec.header && (
+                              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
+                                <span>{secIcon[sec.header]??"📌"}</span>
+                                <span style={{ fontFamily:"Bebas Neue, sans-serif", fontSize:12, color:secColor[sec.header]??"#778", letterSpacing:".08em" }}>{sec.header}</span>
+                              </div>
+                            )}
+                            <div style={{ color:"#99a", fontSize:11, lineHeight:1.7 }}>
+                              {sec.lines.map((l,j) => <div key={j} style={{ color: l.startsWith("YEAR")||l.startsWith("BULL")||l.startsWith("BASE")||l.startsWith("BEAR") ? "#dde1ed" : "#99a" }}>{l}</div>)}
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ fontSize:10, color:"#1a1030", textAlign:"center", paddingTop:4 }}>⚠️ Not real financial advice</div>
+                      </div>
+                    );
+                  })()}
+
+                  {!stockForecasting && !stockForecast && (
+                    <div style={{ padding:"14px 0", textAlign:"center", color:"#2a1a4a" }}>
+                      <div style={{ fontSize:24, marginBottom:6 }}>🔮</div>
+                      <div style={{ fontSize:11 }}>Click ANALYZE for a full 10-year AI forecast of {selectedStock.symbol}</div>
+                    </div>
+                  )}
+
+                  {!stockForecasting && stockForecast && stockForecast.symbol !== selectedStock.symbol && (
+                    <div style={{ padding:"14px 0", textAlign:"center", color:"#2a1a4a" }}>
+                      <div style={{ fontSize:11 }}>Click ANALYZE for a forecast of {selectedStock.symbol}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -1106,6 +1449,7 @@ Remember: this is a simulator, so be educational and engaging. Use real financia
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
