@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: "llama3-70b-8192", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] })
+      body: JSON.stringify({ model: "llama3-groq-70b-8192-tool-use-preview", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] })
     });
     const data = await response.json();
     const text = data?.choices?.[0]?.message?.content ?? "Could not generate forecast.";
